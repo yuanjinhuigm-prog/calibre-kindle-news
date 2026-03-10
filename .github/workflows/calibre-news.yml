@@ -1,0 +1,68 @@
+name: Calibre Auto Push News to Kindle
+on:
+  # 定时执行：UTC 时间 23:00 = 北京时间 07:00（东八区+8）
+  schedule:
+    - cron: '0 23 * * *'
+  # 手动触发（可选，方便测试）
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest  # 使用 Ubuntu 云端环境
+    steps:
+      # 步骤1：安装 Calibre（Ubuntu 环境）
+      - name: Install Calibre
+        run: |
+          sudo -v && wget -nv -O- https://download.calibre-ebook.com/linux.sh | sudo sh
+
+      # 步骤2：创建 Calibre 新闻配方（以知乎日报为例，可替换成其他源）
+      - name: Create News Recipe
+        run: |
+          cat > zhihu_daily.recipe << 'EOF'
+          from calibre.web.feeds.news import BasicNewsRecipe
+          class ZhihuDaily(BasicNewsRecipe):
+              title = '知乎日报'
+              description = '知乎日报每日精选'
+              language = 'zh-CN'
+              oldest_article = 1  # 只抓1天内的新闻
+              max_articles_per_feed = 20  # 最多20篇
+              auto_cleanup = True
+              feeds = [
+                  ('知乎日报', 'https://daily.zhihu.com/rss'),
+              ]
+              # 去除广告/冗余内容
+              keep_only_tags = [
+                  dict(name='div', attrs={'class': 'RichContent-inner'}),
+              ]
+          EOF
+
+      # 步骤3：抓取新闻并发送到 Kindle
+      - name: Fetch News and Send to Kindle
+        env:
+          # 以下参数替换成你自己的！
+          FROM_EMAIL: yuanjinhui163@163.com       # 替换：如 123456@qq.com
+          FROM_PASSWORD: PFybNB5jUm5JzHyy        # 替换：QQ邮箱的授权码（不是登录密码）
+          TO_EMAIL: yuanjinhui@kindle.com   # 替换：如 abc123@kindle.com
+          SMTP_SERVER: smtp.163.com              # 替换：发件邮箱SMTP服务器（QQ填这个，163填smtp.163.com）
+          SMTP_PORT: 465                        # 替换：端口（QQ/163 填465）
+        run: |
+          # 用 Calibre 抓取新闻并转换为 MOBI 格式
+          ebook-convert zhihu_daily.recipe zhihu_daily.mobi --language zh-CN
+          # 发送邮件到 Kindle（使用 ssmtp 工具）
+          sudo apt-get update && sudo apt-get install -y ssmtp
+          # 配置 ssmtp
+          sudo bash -c 'cat > /etc/ssmtp/ssmtp.conf << EOF
+          root=$FROM_EMAIL
+          mailhub=$SMTP_SERVER:$SMTP_PORT
+          AuthUser=$FROM_EMAIL
+          AuthPass=$FROM_PASSWORD
+          UseTLS=YES
+          UseSTARTTLS=YES
+          FromLineOverride=YES
+          EOF'
+          # 发送邮件
+          echo "Subject: 知乎日报 $(date +%Y-%m-%d)
+          MIME-Version: 1.0
+          Content-Type: application/x-mobipocket-ebook; name=\"zhihu_daily.mobi\"
+          Content-Disposition: attachment; filename=\"zhihu_daily.mobi\"
+          " | ( cat -; base64 zhihu_daily.mobi ) | ssmtp $TO_EMAIL
