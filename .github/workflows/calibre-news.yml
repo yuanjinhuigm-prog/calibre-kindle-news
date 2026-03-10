@@ -16,25 +16,34 @@ jobs:
           sudo -v && wget -nv -O- https://download.calibre-ebook.com/linux.sh | sudo sh
 
       # 步骤2：创建 Calibre 新闻配方（以知乎日报为例，可替换成其他源）
-      - name: Create News Recipe
-        run: |
-          cat > zhihu_daily.recipe << 'EOF'
-          from calibre.web.feeds.news import BasicNewsRecipe
-          class ZhihuDaily(BasicNewsRecipe):
-              title = '知乎日报'
-              description = '知乎日报每日精选'
-              language = 'zh-CN'
-              oldest_article = 1  # 只抓1天内的新闻
-              max_articles_per_feed = 20  # 最多20篇
-              auto_cleanup = True
-              feeds = [
-                  ('知乎日报', 'https://daily.zhihu.com/rss'),
-              ]
-              # 去除广告/冗余内容
-              keep_only_tags = [
-                  dict(name='div', attrs={'class': 'RichContent-inner'}),
-              ]
-          EOF
+- name: Create News Recipe
+  run: |
+    cat > multi_news.recipe << 'EOF'
+    from calibre.web.feeds.news import BasicNewsRecipe
+    class MultiSourceNews(BasicNewsRecipe):
+        title = 'BBC+纽约时报每日新闻'  # 自定义标题（Kindle里显示的名称）
+        description = 'BBC全球新闻 + 纽约时报国际新闻合集'
+        language = 'en'  # 语言：英文填en，中文填zh-CN
+        oldest_article = 1  # 只抓1天内的新闻
+        max_articles_per_feed = 15  # 每个源最多抓15篇，避免文件太大
+        auto_cleanup = True
+        # 核心：添加多个RSS地址（格式：('源名称', 'RSS链接'),）
+        feeds = [
+            # BBC系列
+            ('BBC Global News', 'https://feeds.bbci.co.uk/news/rss.xml'),
+            ('BBC World News', 'https://feeds.bbci.co.uk/news/world/rss.xml'),
+            # 纽约时报系列
+            ('NYT HomePage', 'https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml'),
+            ('NYT World News', 'https://rss.nytimes.com/services/xml/rss/nyt/World.xml'),
+            # 可继续添加：每行按格式加一个，最后加逗号
+            # ('自定义名称', '你的RSS链接'),
+        ]
+        # 清理冗余内容，只保留正文（可选）
+        keep_only_tags = [
+            dict(name='div', attrs={'class': 'story-body__inner'}),  # BBC正文
+            dict(name='article', attrs={'class': 'story-wrapper'}),   # NYT正文
+        ]
+    EOF
 
       # 步骤3：抓取新闻并发送到 Kindle
       - name: Fetch News and Send to Kindle
