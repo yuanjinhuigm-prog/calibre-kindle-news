@@ -1,65 +1,63 @@
-name: Calibre Auto Push News to Kindle
+name: Calibre Auto Push BBC+NYT News to Kindle
 on:
-  # 定时执行：UTC 时间 23:00 = 北京时间 07:00（东八区+8）
+  # Schedule: UTC 23:00 = Beijing 07:00 (adjust as needed)
   schedule:
     - cron: '0 23 * * *'
-  # 手动触发（可选，方便测试）
+  # Manual trigger (for testing)
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-latest  # 使用 Ubuntu 云端环境
+    runs-on: ubuntu-latest
     steps:
-      # 步骤1：安装 Calibre（Ubuntu 环境）
+      # Step 1: Install Calibre (Ubuntu environment)
       - name: Install Calibre
         run: |
           sudo -v && wget -nv -O- https://download.calibre-ebook.com/linux.sh | sudo sh
 
-      # 步骤2：创建 Calibre 新闻配方（以知乎日报为例，可替换成其他源）
-- name: Create News Recipe
-  run: |
-    cat > multi_news.recipe << 'EOF'
-    from calibre.web.feeds.news import BasicNewsRecipe
-    class MultiSourceNews(BasicNewsRecipe):
-        title = 'BBC+纽约时报每日新闻'  # 自定义标题（Kindle里显示的名称）
-        description = 'BBC全球新闻 + 纽约时报国际新闻合集'
-        language = 'en'  # 语言：英文填en，中文填zh-CN
-        oldest_article = 1  # 只抓1天内的新闻
-        max_articles_per_feed = 15  # 每个源最多抓15篇，避免文件太大
-        auto_cleanup = True
-        # 核心：添加多个RSS地址（格式：('源名称', 'RSS链接'),）
-        feeds = [
-            # BBC系列
-            ('BBC Global News', 'https://feeds.bbci.co.uk/news/rss.xml'),
-            ('BBC World News', 'https://feeds.bbci.co.uk/news/world/rss.xml'),
-            # 纽约时报系列
-            ('NYT HomePage', 'https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml'),
-            ('NYT World News', 'https://rss.nytimes.com/services/xml/rss/nyt/World.xml'),
-            # 可继续添加：每行按格式加一个，最后加逗号
-            # ('自定义名称', '你的RSS链接'),
-        ]
-        # 清理冗余内容，只保留正文（可选）
-        keep_only_tags = [
-            dict(name='div', attrs={'class': 'story-body__inner'}),  # BBC正文
-            dict(name='article', attrs={'class': 'story-wrapper'}),   # NYT正文
-        ]
-    EOF
+      # Step 2: Create Calibre News Recipe (BBC + NYT RSS)
+      - name: Create Multi-Source News Recipe
+        run: |
+          cat > bbc_nyt_news.recipe << 'EOF'
+          from calibre.web.feeds.news import BasicNewsRecipe
+          class BBCNYTNews(BasicNewsRecipe):
+              title = 'BBC + NYT Daily News'
+              description = 'BBC Global News + New York Times World News'
+              language = 'en'
+              oldest_article = 1  # Only fetch 1 day of articles
+              max_articles_per_feed = 15  # 15 articles per RSS source (avoid large files)
+              auto_cleanup = True
+              # RSS Sources (BBC + NYT)
+              feeds = [
+                  ('BBC Global News', 'https://feeds.bbci.co.uk/news/rss.xml'),
+                  ('BBC World News', 'https://feeds.bbci.co.uk/news/world/rss.xml'),
+                  ('NYT HomePage', 'https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml'),
+                  ('NYT World News', 'https://rss.nytimes.com/services/xml/rss/nyt/World.xml'),
+              ]
+              # Clean up redundant content (keep only main text)
+              keep_only_tags = [
+                  dict(name='div', attrs={'class': 'story-body__inner'}),  # BBC main content
+                  dict(name='article', attrs={'class': 'story-wrapper'}),   # NYT main content
+              ]
+          EOF
 
-      # 步骤3：抓取新闻并发送到 Kindle
+      # Step 3: Fetch news & send to Kindle (163 email config)
       - name: Fetch News and Send to Kindle
         env:
-          # 以下参数替换成你自己的！
-          FROM_EMAIL: yuanjinhui163@163.com       # 替换：如 123456@qq.com
-          FROM_PASSWORD: PFybNB5jUm5JzHyy        # 替换：QQ邮箱的授权码（不是登录密码）
-          TO_EMAIL: yuanjinhui@kindle.com   # 替换：如 abc123@kindle.com
-          SMTP_SERVER: smtp.163.com              # 替换：发件邮箱SMTP服务器（QQ填这个，163填smtp.163.com）
-          SMTP_PORT: 465                        # 替换：端口（QQ/163 填465）
+          # Replace these with your own 163 email/Kindle info
+          FROM_EMAIL: "yuanjinhui163@163.com"       # e.g., 123456@163.com
+          FROM_PASSWORD: "PFybNB5jUm5JzHyy"   # 163 email SMTP auth code (NOT login password)
+          TO_EMAIL: "yuanjinhui@kindle.com"   # e.g., abc123@kindle.com
+          SMTP_SERVER: "smtp.163.com"                  # Fixed for 163 email
+          SMTP_PORT: "465"                             # Fixed for 163 email (SSL)
         run: |
-          # 用 Calibre 抓取新闻并转换为 MOBI 格式
-          ebook-convert zhihu_daily.recipe zhihu_daily.mobi --language zh-CN
-          # 发送邮件到 Kindle（使用 ssmtp 工具）
+          # Convert recipe to Kindle-compatible MOBI format
+          ebook-convert bbc_nyt_news.recipe bbc_nyt_news.mobi --language en
+          
+          # Install ssmtp for email sending
           sudo apt-get update && sudo apt-get install -y ssmtp
-          # 配置 ssmtp
+          
+          # Configure ssmtp for 163 email
           sudo bash -c 'cat > /etc/ssmtp/ssmtp.conf << EOF
           root=$FROM_EMAIL
           mailhub=$SMTP_SERVER:$SMTP_PORT
@@ -69,9 +67,10 @@ jobs:
           UseSTARTTLS=YES
           FromLineOverride=YES
           EOF'
-          # 发送邮件
-          echo "Subject: 知乎日报 $(date +%Y-%m-%d)
+          
+          # Send email with MOBI attachment to Kindle
+          echo "Subject: BBC+NYT News $(date +%Y-%m-%d)
           MIME-Version: 1.0
-          Content-Type: application/x-mobipocket-ebook; name=\"zhihu_daily.mobi\"
-          Content-Disposition: attachment; filename=\"zhihu_daily.mobi\"
-          " | ( cat -; base64 zhihu_daily.mobi ) | ssmtp $TO_EMAIL
+          Content-Type: application/x-mobipocket-ebook; name=\"bbc_nyt_news.mobi\"
+          Content-Disposition: attachment; filename=\"bbc_nyt_news.mobi\"
+          " | ( cat -; base64 bbc_nyt_news.mobi ) | ssmtp $TO_EMAIL
